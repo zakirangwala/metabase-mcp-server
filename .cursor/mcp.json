@@ -1,0 +1,12 @@
+{
+    "mcpServers": {
+      "metabase": {
+        "type": "http",
+        "url": "http://127.0.0.1:3200/mcp",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer mb_zr4tCoeBUjWg4X4OGTcrYfKD2xr9ZLusmNQbosUCRP8="
+        }
+      }
+    }
+  }

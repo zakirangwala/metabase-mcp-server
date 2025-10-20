@@ -71,6 +71,45 @@ def parse_configuration() -> Configuration:
         default=os.getenv("METABASE_API_KEY", ""),
         help="Metabase API key"
     )
+
+    # --- Auth & security related options ---
+    parser.add_argument(
+        "--auth-mode",
+        type=str,
+        choices=["none", "static-token"],
+        default=os.getenv("METABASE_MCP_AUTH_MODE"),
+        help="Authentication strategy for HTTP transports"
+    )
+    parser.add_argument(
+        "--auth-token",
+        action="append",
+        default=None,
+        help="Register a bearer token in the form client=token or client=token|scope1,scope2 (repeatable)"
+    )
+    parser.add_argument(
+        "--auth-token-file",
+        type=str,
+        default=os.getenv("METABASE_MCP_AUTH_TOKEN_FILE"),
+        help="Path to a file containing one token entry per line"
+    )
+    parser.add_argument(
+        "--required-scope",
+        action="append",
+        default=None,
+        help="Declare a scope that every token must include (repeatable)"
+    )
+    parser.add_argument(
+        "--allow-unauthenticated-http",
+        action="store_true",
+        default=os.getenv("METABASE_MCP_ALLOW_UNAUTHENTICATED_HTTP", "false").lower() in ["1", "true", "yes"],
+        help="Explicitly allow HTTP transports to run without authentication (not recommended)"
+    )
+    parser.add_argument(
+        "--log-sql-queries",
+        action="store_true",
+        default=os.getenv("METABASE_MCP_LOG_SQL_QUERIES", "false").lower() in ["1", "true", "yes"],
+        help="Emit raw SQL text at DEBUG level (may leak sensitive data)"
+    )
     
     # Parse arguments
     args = parser.parse_args()
@@ -81,6 +120,49 @@ def parse_configuration() -> Configuration:
     if not args.metabase_api_key:
         parser.error("--metabase-api-key is required (or set METABASE_API_KEY environment variable)")
     
+    # Derive auth-mode default if not provided: none for stdio, static-token for HTTP transports
+    if not args.auth_mode:
+        args.auth_mode = "none" if args.transport == "stdio" else "static-token"
+
+    # Collect tokens from env and flags
+    # Environment variable can be comma or newline separated
+    env_tokens_raw = os.getenv("METABASE_MCP_AUTH_TOKENS", "").strip()
+    env_token_entries: List[str] = []
+    if env_tokens_raw:
+        env_token_entries = [t.strip() for chunk in env_tokens_raw.split("\n") for t in chunk.split(",") if t.strip()]
+
+    file_token_entries: List[str] = []
+    if args.auth_token_file and os.path.exists(args.auth_token_file):
+        try:
+            with open(args.auth_token_file, "r", encoding="utf-8") as f:
+                file_token_entries = [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
+        except Exception:
+            file_token_entries = []
+
+    cli_token_entries: List[str] = args.auth_token or []
+
+    all_token_entries: List[str] = [*env_token_entries, *file_token_entries, *cli_token_entries]
+
+    # Parse entries like client=token or client=token|scope1,scope2 into a dict
+    auth_tokens: Dict[str, Dict[str, object]] = {}
+    for entry in all_token_entries:
+        if "=" not in entry:
+            continue
+        client_id, value = entry.split("=", 1)
+        scopes: List[str] = []
+        token = value
+        if "|" in value:
+            token, scope_part = value.split("|", 1)
+            scopes = [s.strip() for s in scope_part.split(",") if s.strip()]
+        auth_tokens[client_id.strip()] = {"token": token.strip(), "scopes": scopes}
+
+    # Required scopes from env and flags
+    env_required_scopes_raw = os.getenv("METABASE_MCP_REQUIRED_SCOPES", "").strip()
+    env_required_scopes: List[str] = []
+    if env_required_scopes_raw:
+        env_required_scopes = [s.strip() for chunk in env_required_scopes_raw.split("\n") for s in chunk.split(",") if s.strip()]
+    required_scopes: List[str] = list(dict.fromkeys([*(args.required_scope or []), *env_required_scopes]))
+
     # Type cast the transport and log_level to ensure they match the Literal types
     transport: TransportType = args.transport  # type: ignore
     log_level: LogLevelType = args.log_level  # type: ignore
@@ -91,7 +173,12 @@ def parse_configuration() -> Configuration:
         transport=transport,
         log_level=log_level,
         metabase_url=args.metabase_url,
-        metabase_api_key=args.metabase_api_key
+        metabase_api_key=args.metabase_api_key,
+        auth_mode=args.auth_mode,  # type: ignore[arg-type]
+        auth_tokens=auth_tokens,
+        allow_unauthenticated_http=bool(args.allow_unauthenticated_http),
+        required_scopes=required_scopes,
+        log_sql_queries=bool(args.log_sql_queries),
     )
 
 # Parse configuration

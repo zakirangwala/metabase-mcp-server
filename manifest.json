@@ -23,7 +23,12 @@
       ],
       "env": {
         "METABASE_URL": "${user_config.METABASE_URL}",
-        "METABASE_API_KEY": "${user_config.METABASE_API_KEY}"
+        "METABASE_API_KEY": "${user_config.METABASE_API_KEY}",
+        "METABASE_MCP_AUTH_MODE": "${user_config.METABASE_MCP_AUTH_MODE}",
+        "METABASE_MCP_AUTH_TOKENS": "${user_config.METABASE_MCP_AUTH_TOKENS}",
+        "METABASE_MCP_ALLOW_UNAUTHENTICATED_HTTP": "${user_config.METABASE_MCP_ALLOW_UNAUTHENTICATED_HTTP}",
+        "METABASE_MCP_REQUIRED_SCOPES": "${user_config.METABASE_MCP_REQUIRED_SCOPES}",
+        "METABASE_MCP_LOG_SQL_QUERIES": "${user_config.METABASE_MCP_LOG_SQL_QUERIES}"
       }
     }
   },
@@ -41,6 +46,48 @@
       "description": "Metabse API key often starts with “mb_…”",
       "required": false,
       "sensitive": true
+    },
+    "METABASE_MCP_AUTH_MODE": {
+      "type": "string",
+      "title": "Authentication Mode",
+      "description": "How the MCP server authenticates HTTP clients. Use 'static-token' for shared bearer tokens or 'none' for local stdio usage.",
+      "enum": [
+        "static-token",
+        "none"
+      ],
+      "default": "static-token",
+      "required": false,
+      "sensitive": false
+    },
+    "METABASE_MCP_AUTH_TOKENS": {
+      "type": "string",
+      "title": "Shared Auth Tokens",
+      "description": "Optional comma or newline separated static bearer tokens in the format client_id=token or token. Sensitive: do not share publicly.",
+      "required": false,
+      "sensitive": true
+    },
+    "METABASE_MCP_ALLOW_UNAUTHENTICATED_HTTP": {
+      "type": "boolean",
+      "title": "Allow Unauthenticated HTTP",
+      "description": "Permit HTTP access without auth (discouraged; only for tightly controlled networks).",
+      "default": false,
+      "required": false,
+      "sensitive": false
+    },
+    "METABASE_MCP_REQUIRED_SCOPES": {
+      "type": "string",
+      "title": "Required Scopes",
+      "description": "Optional comma or newline separated scopes that must be present on bearer tokens.",
+      "required": false,
+      "sensitive": false
+    },
+    "METABASE_MCP_LOG_SQL_QUERIES": {
+      "type": "boolean",
+      "title": "Log SQL Queries",
+      "description": "Enable DEBUG logging of raw SQL (keep disabled unless you are debugging).",
+      "default": false,
+      "required": false,
+      "sensitive": false
     }
   },
   "keywords": [

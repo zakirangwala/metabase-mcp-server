@@ -136,16 +136,31 @@ Create a `.env` file in the project root:
 ```env
 METABASE_URL=http://localhost:3000
 METABASE_API_KEY=mb_xxx_your_key
-PORT=3200
 HOST=localhost
+PORT=3200
 TRANSPORT=streamable-http
-LOG_LEVEL=DEBUG
+LOG_LEVEL=INFO
+METABASE_MCP_AUTH_MODE=static-token
+METABASE_MCP_AUTH_TOKENS=slack-bot=super-secret-token
+# Optional: comma or newline separated scopes that every token must include
+METABASE_MCP_REQUIRED_SCOPES=read,write
+# Leave unset unless you intentionally want raw SQL in logs
+METABASE_MCP_LOG_SQL_QUERIES=false
 ```
 
 **Option 2: Using command-line arguments**
 Pass configuration directly via command line:
 ```bash
- uv run src/metabase_mcp_server.py --metabase-url http://localhost:3000 --metabase-api-key "YOUR_API_KEY" --port 3200 --host localhost --transport streamable-http --log-level DEBUG
+ uv run src/metabase_mcp_server.py \
+   --metabase-url http://localhost:3000 \
+   --metabase-api-key "YOUR_API_KEY" \
+   --transport streamable-http \
+   --host 0.0.0.0 \
+   --port 3200 \
+   --auth-mode static-token \
+   --auth-token slack-bot=super-secret-token \
+   --required-scope read \
+   --log-level INFO
 ```
 
 **Option 3: Using environment variables in MCP client config**
@@ -155,16 +170,19 @@ Configure directly in your MCP client without a `.env` file (see examples below)
 {
   "mcpServers": {
     "metabase": {
-      "type": "stdio"
+      "type": "stdio",
       "command": "uv",
-      "args": ["run", "C:\\Users\\YourName\\Projects\\metabase-mcp-server\\src\\metabase_mcp_server.py"],
+      "args": ["run", "C:\\\\Users\\\\YourName\\\\Projects\\\\metabase-mcp-server\\\\src\\\\metabase_mcp_server.py"],
       "env": {
-        METABASE_URL=http://localhost:3000
-        METABASE_API_KEY=mb_xxx_your_key
-        PORT=3200
-        HOST=localhost
-        TRANSPORT=streamable-http
-        LOG_LEVEL=DEBUG
+        "METABASE_URL": "http://localhost:3000",
+        "METABASE_API_KEY": "mb_xxx_your_key",
+        "HOST": "localhost",
+        "PORT": "3200",
+        "TRANSPORT": "streamable-http",
+        "LOG_LEVEL": "INFO",
+        "METABASE_MCP_AUTH_MODE": "static-token",
+        "METABASE_MCP_AUTH_TOKENS": "slack-bot=super-secret-token",
+        "METABASE_MCP_REQUIRED_SCOPES": "read"
       }
     }
   }
@@ -256,10 +274,16 @@ The Metabase MCP Server supports flexible configuration through environment vari
 |----------|-------------|---------------|---------|
 | `METABASE_URL` | Your Metabase instance URL | Required | `http://127.0.0.1:3000` |
 | `METABASE_API_KEY` | Your Metabase API key | Required | `mb_xxx_your_api_key` |
-| `TRANSPORT` | Transport protocol | `streamable-http` | `stdio`, `streamable-http` |
+| `TRANSPORT` | Transport protocol | `stdio` | `stdio`, `streamable-http` |
 | `HOST` | Host for HTTP transports | `localhost` | `0.0.0.0`, `127.0.0.1` |
 | `PORT` | Port for HTTP transports | `3200` | `8080`, `9000` |
 | `LOG_LEVEL` | Logging level | `INFO` | `DEBUG`, `WARNING`, `ERROR` |
+| `METABASE_MCP_AUTH_MODE` | Authentication strategy (`static-token` recommended for HTTP) | `none` (stdio) / `static-token` (HTTP) | `static-token` |
+| `METABASE_MCP_AUTH_TOKENS` | Comma/newline separated static tokens (`client=token` format) | _(empty)_ | `slack-bot=super-secret-token` |
+| `METABASE_MCP_AUTH_TOKEN_FILE` | Path to file containing one token entry per line | _(empty)_ | `/run/secrets/metabase_mcp_tokens` |
+| `METABASE_MCP_REQUIRED_SCOPES` | Comma/newline separated scopes each token must include | _(empty)_ | `read,write` |
+| `METABASE_MCP_ALLOW_UNAUTHENTICATED_HTTP` | Opt-in toggle to run HTTP without auth (not recommended) | `false` | `true` |
+| `METABASE_MCP_LOG_SQL_QUERIES` | Enable DEBUG logging of raw SQL text | `false` | `true` |
 
 ### Command-line Arguments
 
@@ -267,10 +291,16 @@ The Metabase MCP Server supports flexible configuration through environment vari
 |----------|-------------|---------------|
 | `--metabase-url` | Metabase instance URL | Required |
 | `--metabase-api-key` | Metabase API key | Required |
-| `--transport` | Transport protocol | `streamable-http` |
+| `--transport` | Transport protocol | `stdio` |
 | `--host` | Host for HTTP transports | `localhost` |
 | `--port` | Port for HTTP transports | `3200` |
 | `--log-level` | Logging verbosity level | `INFO` |
+| `--auth-mode` | Authentication strategy (`static-token` or `none`) | `none` (stdio) / `static-token` (HTTP) |
+| `--auth-token` | Register a shared bearer token (repeatable, format `client=token`) | _(empty)_ |
+| `--auth-token-file` | Load bearer tokens from a file | _(empty)_ |
+| `--required-scope` | Declare scopes that every token must include | _(empty)_ |
+| `--allow-unauthenticated-http` | Explicitly allow HTTP without auth | `false` |
+| `--log-sql-queries` | Emit raw SQL at DEBUG level | `false` |
 
 ### Transport Protocols
 
@@ -295,6 +325,23 @@ uv run src/metabase_mcp_server.py --transport streamable-http --host localhost -
 ```
 
 **Note:** You don't need to pass every parameter when running the server. However, you must provide the Metabase URL and API key. Any parameters not specified will use their default values as shown above.
+
+---
+
+## 🔐 Authentication & Authorization
+
+Remote deployments **must** run with authentication enabled. The server ships with a hardened default that rejects unauthenticated HTTP calls unless you explicitly opt out.
+
+- **Auth modes**
+  - `static-token` (recommended): require callers to send `Authorization: Bearer <token>` headers. Define tokens via `METABASE_MCP_AUTH_TOKENS`, `METABASE_MCP_AUTH_TOKEN_FILE`, or repeated `--auth-token` flags.
+  - `none`: only use this for local `stdio` transports or if you are terminating auth in a separate proxy. For HTTP transports you must also pass `--allow-unauthenticated-http`.
+- **Token format:** `client_id=token|scope1,scope2`. The `client_id` is a friendly label used in logs. Scopes are optional metadata; when `METABASE_MCP_REQUIRED_SCOPES` / `--required-scope` is set, every token must declare those scopes.
+- **Multiple tokens:** separate entries with commas/newlines or repeat `--auth-token`. You can store secrets in AWS Secrets Manager / SSM and mount them via `METABASE_MCP_AUTH_TOKEN_FILE`.
+- **Slack & Cursor bots:** configure your integration to send the shared token in the `Authorization` header. Tokens are never logged; only the `client_id` appears in INFO logs.
+- **Dangerous override:** `METABASE_MCP_ALLOW_UNAUTHENTICATED_HTTP=true` (or `--allow-unauthenticated-http`) disables auth checks—only enable inside an isolated VPC or during local debugging.
+- **SQL logging:** `METABASE_MCP_LOG_SQL_QUERIES` / `--log-sql-queries` is disabled by default to avoid leaking sensitive literals. Turn it on only when debugging and remember to revert.
+
+Pair authentication with TLS termination (ALB, API Gateway, Nginx, etc.) so bearer tokens and Metabase API keys never traverse the network in plaintext.
 
 ---
 
@@ -366,8 +413,13 @@ docker build -t metabase-mcp-server .
 # Run with environment variables
 docker run -d \
   -p 3200:3200 \
-  -e METABASE_URL="http://your-metabase-instance.com" \
+  -e TRANSPORT="streamable-http" \
+  -e HOST="0.0.0.0" \
+  -e PORT="3200" \
+  -e METABASE_URL="https://your-metabase-instance.com" \
   -e METABASE_API_KEY="mb_xxx_your_api_key" \
+  -e METABASE_MCP_AUTH_MODE="static-token" \
+  -e METABASE_MCP_AUTH_TOKENS="slack-bot=super-secret-token,analytics-bot=another-token" \
   metabase-mcp-server
 ```
 
@@ -380,14 +432,25 @@ services:
     ports:
       - "3200:3200"
     environment:
-      - METABASE_URL=http://your-metabase-instance.com
+      - TRANSPORT=streamable-http
+      - HOST=0.0.0.0
+      - PORT=3200
+      - METABASE_URL=https://your-metabase-instance.com
       - METABASE_API_KEY=mb_xxx_your_api_key
-      ##- PORT=3200
-      ##- HOST=localhost
-      ##- TRANSPORT=streamable-http
-      ##- LOG_LEVEL=DEBUG
+      - METABASE_MCP_AUTH_MODE=static-token
+      # Store tokens in an external secret and mount as a file in production
+      - METABASE_MCP_AUTH_TOKEN_FILE=/run/secrets/metabase_mcp_tokens
+      #- METABASE_MCP_REQUIRED_SCOPES=read,write
+      #- METABASE_MCP_LOG_SQL_QUERIES=false
     restart: unless-stopped
+    secrets:
+      - metabase_mcp_tokens
+secrets:
+  metabase_mcp_tokens:
+    file: ./secrets/metabase_mcp_tokens
 ```
+
+Create `./secrets/metabase_mcp_tokens` with one entry per line in the form `client_id=token|scope1,scope2`. Mount it from AWS Secrets Manager / Parameter Store in production.
 
 #### Connecting to Remote MCP Server
 
@@ -398,7 +461,7 @@ Once deployed, configure your MCP clients to connect to the remote server:
   "mcpServers": {
     "metabase": {
       "type": "streamable-http",
-      "url": "http://server-ip:3200/mcp/"
+      "url": "https://metabase-mcp.yourdomain.com/mcp/"
     }
   }
 }
@@ -411,11 +474,12 @@ Once deployed, configure your MCP clients to connect to the remote server:
 - **Platform-as-a-Service:** Railway, Render, Fly.io
 
 ### Security Considerations
-- Use HTTPS in production environments
-- Implement proper firewall rules
-- Consider VPN access for sensitive business data
-- Regularly rotate API keys
-- Monitor access logs
+- Terminate TLS (ALB, Nginx, API Gateway) and expose only HTTPS endpoints
+- Keep `METABASE_MCP_AUTH_MODE=static-token` for all HTTP deployments; rotate tokens regularly
+- Inject secrets via Docker/Compose/SSM rather than hardcoding them in images
+- Restrict inbound traffic with security groups / firewalls and prefer private subnets or VPN access
+- Monitor access logs and Metabase audit logs for anomalous behaviour
+- Rotate Metabase API keys and static bearer tokens on a schedule
 
 ### Need Help with Deployment?
 Our team at CodeWalnut offers deployment and consulting services. [Contact us](#-connect-with-us) for enterprise-grade setup and support.
