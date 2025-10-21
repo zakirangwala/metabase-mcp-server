@@ -37,5 +37,7 @@ class Configuration:
                 "Provide auth tokens or explicitly allow unauthenticated access."
             )
         
-        if self.auth_mode == "static-token" and not self.auth_tokens:
-            raise ValueError("Static-token authentication requires at least one token")
+        # Note: We allow static-token mode without tokens for now since middleware injection
+        # is not yet implemented. Users should use a reverse proxy for authentication.
+        # if self.auth_mode == "static-token" and not self.auth_tokens:
+        #     raise ValueError("Static-token authentication requires at least one token")

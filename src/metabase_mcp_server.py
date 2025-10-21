@@ -243,7 +243,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[None]:
             await session.close()
             session = None
 
-# Initialize FastMCP agent
+# Initialize FastMCP agent  
 mcp = FastMCP("metabase", lifespan=app_lifespan)
 
 async def make_metabase_request(
@@ -1419,14 +1419,27 @@ async def execute_sql_query(
     return await make_metabase_request(RequestMethod.POST, "/api/dataset", json=query_payload)
 
 
+def run_with_auth():
+    """
+    Run MCP server. Note: Authentication middleware injection is a work-in-progress.
+    For production HTTP deployments, use a reverse proxy (nginx, API Gateway, etc.) for authentication.
+    """
+    if config.auth_mode == "static-token" and TRANSPORT != "stdio":
+        logger.warning("⚠️  Static-token authentication is configured but middleware injection is not yet implemented")
+        logger.warning("⚠️  For production HTTP deployments, use a reverse proxy (nginx, API Gateway, Cloudflare, etc.) for authentication")
+        logger.info(f"Configured client tokens (for documentation): {list(config.auth_tokens.keys())}")
+        logger.info(f"Required scopes (for documentation): {config.required_scopes if config.required_scopes else 'none'}")
+    
+    # Run the server normally
+    if TRANSPORT == "stdio":
+        mcp.run(transport=TRANSPORT)
+    else:
+        mcp.run(host=HOST, port=PORT, transport=TRANSPORT)
+
 if __name__ == "__main__":
     # Start the MCP server with configuration from arguments/environment
     logger.info(f"Starting Metabase MCP Server on {HOST}:{PORT}")
     logger.info(f"Using transport: {TRANSPORT}")
     logger.info(f"Connecting to Metabase at {METABASE_URL}")
     
-    # Start the MCP server
-    if(TRANSPORT == "stdio"):
-        mcp.run(transport=TRANSPORT)
-    else:
-        mcp.run(host=HOST, port=PORT, transport=TRANSPORT) 
+    run_with_auth() 
